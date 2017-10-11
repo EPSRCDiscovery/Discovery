@@ -1,0 +1,5 @@
+Simple matrix multiplication of square matrices A and B of the dimensions dim x dim
+
+matmult_pthreads_simple.c contains the basic parallelisation, where N threads are created, each of them doing dim/N multiplications of one row of matrix A with the whole matrix B
+
+matmult_pthread_nested.c contains nested parallelisation, where first N threads are created as in the basic parallelisation, then each of these threads creates a fixed number of additional threads to perform the actual multiplications.

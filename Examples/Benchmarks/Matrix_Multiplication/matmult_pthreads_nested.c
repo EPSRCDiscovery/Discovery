@@ -10,13 +10,19 @@ double **a;
 double **b;
 double **res;
 int dim;
-
+int inner_thread_cnt;
 
 typedef struct {
   int thread_lo;
   int thread_hi;
   pthread_t thread_id;
 } thread_info_t;
+
+typedef struct {
+  int loInd;
+  int hiInd;
+  pthread_t thread_id;
+} inner_thread_info_t;
 
 thread_info_t thread_info[100];
 
@@ -46,6 +52,8 @@ double multiply_row_by_column (double **mat1, int row, double **mat2, int col)
   double sum=0;
   for (k=0; k<dim; k++)
     sum += mat1[row][k] * mat2[k][col];
+
+  return sum;
 }
 
 
@@ -58,12 +66,12 @@ void multiply_row_by_matrix (double **mat1, int row, double **mat2, double **res
 static void* inner_thread_function (void *arg)
 {
   inner_thread_info_t *info = (inner_thread_info_t *) arg;
-  double **mat1 = info->mat1;
-  double **mat2 = info->mat2;
-  int ind = info->ind;
-  double **res = info->res;
+  int loInd = info->loInd;
+  int hiInd = info->hiInd;
 
-  multiply_row_by_matrix(mat1, ind, mat2, res);
+  for (int i=loInd; i<hiInd; i++) {
+    multiply_row_by_matrix(a, i, b, res);
+  }
 
   return NULL;
 }
@@ -79,16 +87,39 @@ static void *thread_function (void* arg)
   int hi_bound = info -> thread_hi;
 
   pthread_attr_t attr;
-  pthread_t inner_thread[100];
-  status = pthread_attr_init(&attr);
+  inner_thread_info_t inner_thread[inner_thread_cnt];
+  int status = pthread_attr_init(&attr);
   if (status != 0) {
     fprintf (stderr, "Error creating thread attribute set!\n");
     exit(1);
   }
+
+  int chunk_size = hi_bound - lo_bound / inner_thread_cnt;
+  int extra_pool = dim - (inner_thread_cnt * chunk_size);
+  int count = 0;
   
-  for (unsigned int i = lo_bound; i < hi_bound; i++){
-	  multiply_row_by_matrix(a, i, b, res);
+  if (chunk_size > 0) {
+    for (unsigned int thread_ind = 0; thread_ind < inner_thread_cnt; thread_ind++) {
+      int extra = 0;
+      if (extra_pool>0) {
+	extra = 1;
+	extra_pool--;
+      } 
+      int chunk = chunk_size + extra;
+      inner_thread[thread_ind].loInd = count;
+      inner_thread[thread_ind].hiInd = count + chunk;
+      count += chunk;
+    
+      status = pthread_create(&inner_thread[thread_ind].thread_id, &attr, &inner_thread_function, &inner_thread[thread_ind]);
+    }
+  } else {
+    for (unsigned int i = lo_bound; i < hi_bound; i++) {
+      multiply_row_by_matrix(a, i, b, res);
+    }
   }
+
+  for (unsigned int thread_ind = 0; thread_ind < inner_thread_cnt; thread_ind++) 
+    pthread_join(inner_thread[thread_ind].thread_id, NULL);
   
   return (void *)0;
 }
@@ -96,11 +127,12 @@ static void *thread_function (void* arg)
 int main (int argc, char *argv[])
 {
   if (argc<3) {
-    fprintf (stderr, "Usage: matmult_pthreads <num_workers> <matrix_dim>\n");
+    fprintf (stderr, "Usage: matmult_pthreads_nested <num_workers> <matrix_dim> <inner_thread_count>\n");
     exit(1);
   }
   int dim = atoi(argv[2]);
   int num_workers = atoi(argv[1]);
+  inner_thread_cnt = atoi(argv[3]);
   
   a = (double **) malloc (sizeof(double *) * dim);
   b = (double **) malloc (sizeof(double *) * dim);
